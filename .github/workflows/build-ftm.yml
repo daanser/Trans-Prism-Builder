@@ -108,10 +108,27 @@ jobs:
       if: steps.check.outputs.HAS_CHANGES == 'true'
       working-directory: .
       run: |
+        # 1. 防弹设计：确保文件夹绝对存在，不存在就现建一个！
+        mkdir -p ftm
         echo ${{ env.LATEST_HASH }} > ftm/last_sync_hash.txt
+        
+        # 2. 伪装成机器人
         git config --global user.name "github-actions[bot]"
         git config --global user.email "github-actions[bot]@users.noreply.github.com"
-        git pull origin main --rebase
+        
+        # 3. 核心雷达：自动抓取当前触发工作流的真实分支名 (通常是 main 或 master)
+        CURRENT_BRANCH=${GITHUB_REF#refs/heads/}
+        
+        # 4. 强制切换到该分支，摆脱"无头"状态
+        git checkout $CURRENT_BRANCH
+        
+        # 5. 安全拉取并合并可能存在的冲突
+        git pull origin $CURRENT_BRANCH --rebase || true
+        
+        # 6. 提交日志
         git add ftm/last_sync_hash.txt
-        git commit -m "📝 chore(ftm): 自动更新指纹日志"
-        git push
+        # 如果文件内容没变（极其罕见），跳过 commit 防止报错中断
+        git commit -m "📝 chore(ftm): 自动更新指纹日志" || echo "无新日志需要提交"
+        
+        # 7. 精准推送到刚才获取的分支！
+        git push origin $CURRENT_BRANCH
