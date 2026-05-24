@@ -42,7 +42,7 @@ jobs:
     - name: Clone Upstream Wiki
       if: steps.check.outputs.HAS_CHANGES == 'true' || github.event_name == 'workflow_dispatch'
       run: |
-        git clone https://github.com/project-trans/MtF.wiki.git official-source
+        git -c credential.helper= clone https://github.com/project-trans/MtF.wiki.git official-source
         mv official-source/content ./content
         if [ -d "official-source/static" ]; then mv official-source/static ./static; fi
         rm -rf official-source
