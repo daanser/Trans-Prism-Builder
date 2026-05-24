@@ -116,19 +116,17 @@ jobs:
         git config --global user.name "github-actions[bot]"
         git config --global user.email "github-actions[bot]@users.noreply.github.com"
         
-        # 3. 核心雷达：自动抓取当前触发工作流的真实分支名 (通常是 main 或 master)
-        CURRENT_BRANCH=${GITHUB_REF#refs/heads/}
+        # 3. 设置带 token 的 remote URL，确保认证通过
+        git remote set-url origin https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}
         
-        # 4. 强制切换到该分支，摆脱"无头"状态
-        git checkout $CURRENT_BRANCH
+        # 4. 拉取最新代码，避免推送冲突
+        git fetch origin ${{ github.ref_name }}
+        git reset --soft FETCH_HEAD
         
-        # 5. 安全拉取并合并可能存在的冲突
-        git pull origin $CURRENT_BRANCH --rebase || true
-        
-        # 6. 提交日志
+        # 5. 提交日志
         git add rle/last_sync_hash.txt
         # 如果文件内容没变（极其罕见），跳过 commit 防止报错中断
         git commit -m "📝 chore(rle): 自动更新指纹日志" || echo "无新日志需要提交"
         
-        # 7. 精准推送到刚才获取的分支！
-        git push origin $CURRENT_BRANCH
+        # 6. 精准推送到当前分支（无需手动切分支，直接用 HEAD）
+        git push origin HEAD:${{ github.ref_name }}
