@@ -41,7 +41,11 @@ jobs:
     - name: Clone Upstream Wiki
       if: steps.check.outputs.HAS_CHANGES == 'true' || github.event_name == 'workflow_dispatch'
       run: |
-        git -c credential.helper= clone https://github.com/project-trans/RLE.wiki.git official-source
+        # 用 curl 下载 tarball 替代 git clone，彻底绕开 credential helper 问题
+        curl -sL https://github.com/project-trans/RLE.wiki/archive/HEAD.tar.gz -o upstream.tar.gz
+        mkdir -p official-source
+        tar xzf upstream.tar.gz -C official-source --strip-components=1
+        rm -f upstream.tar.gz
         mv official-source/docs ./content # RLE 特殊：官方目录叫 docs
         if [ -d "official-source/static" ]; then mv official-source/static ./static; fi
         rm -rf official-source
