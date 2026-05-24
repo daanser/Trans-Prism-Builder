@@ -1,0 +1,31 @@
+site_name: 稳态光盒 Wiki
+docs_dir: content  # 核心！告诉 MkDocs 我们的文章在 content 文件夹里，不用去管默认的 docs 文件夹
+use_directory_urls: false
+
+theme:
+  name: material
+  language: zh
+  features:
+    #- navigation.instant # 页面无缝切换，App 里体验更好
+    - search.suggest     # 搜索提示功能
+  palette:
+    # 默认选了深蓝色，之后你可以根据 App 的 UI 随时改成粉色(pink)或紫色(purple)
+    primary: indigo
+    accent: indigo
+
+markdown_extensions:
+  - admonition
+  - pymdownx.details
+  - pymdownx.superfences
+  - toc:
+      permalink: true
+
+plugins:
+  - search
+  - awesome-pages
+
+markdown_extensions:
+  - admonition
+  - pymdownx.details
+  - attr_list
+  - md_in_html

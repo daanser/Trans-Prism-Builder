@@ -1,0 +1,117 @@
+name: OTA Builder - RLE
+
+on:
+  schedule:
+    # ⏱️ RLE 在 02:20 跑
+    - cron: '20 18 * * *'
+  workflow_dispatch:
+
+jobs:
+  build-rle:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      
+    defaults:
+      run:
+        working-directory: ./rle
+
+    steps:
+    - name: Checkout Builder Repo
+      uses: actions/checkout@v4
+
+    - name: Check Upstream Hash
+      id: check
+      run: |
+        UPSTREAM_URL="https://github.com/project-trans/RLE.wiki.git"
+        LATEST_HASH=$(git ls-remote $UPSTREAM_URL HEAD | awk '{print $1}')
+        
+        LOCAL_HASH=""
+        if [ -f "last_sync_hash.txt" ]; then
+          LOCAL_HASH=$(cat last_sync_hash.txt)
+        fi
+        
+        if [ "$LATEST_HASH" == "$LOCAL_HASH" ]; then
+          echo "HAS_CHANGES=false" >> $GITHUB_OUTPUT
+        else
+          echo "HAS_CHANGES=true" >> $GITHUB_OUTPUT
+          echo "LATEST_HASH=$LATEST_HASH" >> $GITHUB_ENV
+        fi
+
+    - name: Clone Upstream Wiki
+      if: steps.check.outputs.HAS_CHANGES == 'true' || github.event_name == 'workflow_dispatch'
+      run: |
+        git clone https://github.com/project-trans/RLE.wiki.git official-source
+        mv official-source/docs ./content # RLE 特殊：官方目录叫 docs
+        if [ -d "official-source/static" ]; then mv official-source/static ./static; fi
+        rm -rf official-source
+
+    - name: Set up Python & Install MkDocs
+      if: steps.check.outputs.HAS_CHANGES == 'true' || github.event_name == 'workflow_dispatch'
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.10'
+        
+    - name: Install Dependencies
+      if: steps.check.outputs.HAS_CHANGES == 'true' || github.event_name == 'workflow_dispatch'
+      run: |
+        python -m pip install --upgrade pip
+        pip install mkdocs mkdocs-material
+
+    - name: Run Python Toolchain
+      if: steps.check.outputs.HAS_CHANGES == 'true' || github.event_name == 'workflow_dispatch'
+      run: |
+        # ⚠️ RLE 专属脚本配置：排雷针和翻译官
+        python clean_rle_repo.py
+        sleep 2
+        python compress_wiki.py
+        sleep 2
+        python compress_webp.py
+        sleep 2
+        python fix_index.py
+        sleep 2
+        python fix_nav.py
+        sleep 2
+        python fix_yaml.py
+        sleep 2
+        python nuke_pdfs.py
+        sleep 2
+        python fix_vite_syntax.py
+        sleep 2
+        python nuke_icons.py
+
+    - name: Build MkDocs Site
+      if: steps.check.outputs.HAS_CHANGES == 'true' || github.event_name == 'workflow_dispatch'
+      run: mkdocs build
+
+    - name: Zip Artifact
+      if: steps.check.outputs.HAS_CHANGES == 'true' || github.event_name == 'workflow_dispatch'
+      run: |
+        RELEASE_DATE=$(date -d "+8 hours" +%Y-%m-%d)
+        ZIP_NAME="rle-wiki-site-$RELEASE_DATE.zip"
+        mv site rle-wiki-site-$RELEASE_DATE
+        zip -r $ZIP_NAME rle-wiki-site-$RELEASE_DATE
+        
+        echo "ZIP_PATH=rle/$ZIP_NAME" >> $GITHUB_ENV
+        echo "TAG_NAME=rle-$RELEASE_DATE" >> $GITHUB_ENV
+
+    - name: Create GitHub Release
+      if: steps.check.outputs.HAS_CHANGES == 'true' || github.event_name == 'workflow_dispatch'
+      uses: softprops/action-gh-release@v2
+      with:
+        files: ${{ env.ZIP_PATH }}
+        tag_name: ${{ env.TAG_NAME }}
+        name: "RLE 自动构建版 ${{ env.TAG_NAME }}"
+        body: "🤖 上游同步 Hash: `${{ env.LATEST_HASH }}`"
+
+    - name: Commit Sync Log
+      if: steps.check.outputs.HAS_CHANGES == 'true'
+      working-directory: .
+      run: |
+        echo ${{ env.LATEST_HASH }} > rle/last_sync_hash.txt
+        git config --global user.name "github-actions[bot]"
+        git config --global user.email "github-actions[bot]@users.noreply.github.com"
+        git pull origin main --rebase
+        git add rle/last_sync_hash.txt
+        git commit -m "📝 chore(rle): 自动更新指纹日志"
+        git push

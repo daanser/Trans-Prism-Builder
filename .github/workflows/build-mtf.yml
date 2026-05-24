@@ -1,0 +1,125 @@
+name: OTA Builder - MtF
+
+on:
+  schedule:
+    # ⏱️ 错峰出行！MtF 在 02:00 跑
+    - cron: '0 18 * * *'
+  workflow_dispatch:
+
+jobs:
+  build-mtf:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      
+    # 🔒 核心魔法：让接下来的所有 run 命令，全部默认在这个文件夹里执行！
+    defaults:
+      run:
+        working-directory: ./mtf
+
+    steps:
+    - name: Checkout Builder Repo
+      uses: actions/checkout@v4
+
+    - name: Check Upstream Hash
+      id: check
+      run: |
+        UPSTREAM_URL="https://github.com/project-trans/MtF.wiki.git"
+        LATEST_HASH=$(git ls-remote $UPSTREAM_URL HEAD | awk '{print $1}')
+        
+        LOCAL_HASH=""
+        if [ -f "last_sync_hash.txt" ]; then
+          LOCAL_HASH=$(cat last_sync_hash.txt)
+        fi
+        
+        if [ "$LATEST_HASH" == "$LOCAL_HASH" ]; then
+          echo "HAS_CHANGES=false" >> $GITHUB_OUTPUT
+        else
+          echo "HAS_CHANGES=true" >> $GITHUB_OUTPUT
+          echo "LATEST_HASH=$LATEST_HASH" >> $GITHUB_ENV
+        fi
+
+    - name: Clone Upstream Wiki
+      if: steps.check.outputs.HAS_CHANGES == 'true' || github.event_name == 'workflow_dispatch'
+      run: |
+        git clone https://github.com/project-trans/MtF.wiki.git official-source
+        mv official-source/content ./content
+        if [ -d "official-source/static" ]; then mv official-source/static ./static; fi
+        rm -rf official-source
+
+    - name: Set up Python & Install MkDocs
+      if: steps.check.outputs.HAS_CHANGES == 'true' || github.event_name == 'workflow_dispatch'
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.10'
+        
+    - name: Install Dependencies
+      if: steps.check.outputs.HAS_CHANGES == 'true' || github.event_name == 'workflow_dispatch'
+      run: |
+        python -m pip install --upgrade pip
+        pip install mkdocs mkdocs-material
+
+    - name: Run Python Toolchain
+      if: steps.check.outputs.HAS_CHANGES == 'true' || github.event_name == 'workflow_dispatch'
+      run: |
+        python clean_repo.py
+        sleep 2
+        python compress_wiki.py
+        sleep 2
+        python compress_webp.py
+        sleep 2
+        python nuke_pdfs.py
+        sleep 2
+        python fix_nav.py
+        sleep 2
+        python fix_index.py
+        sleep 2
+        python fix_yaml.py
+        sleep 2
+        python move_static.py
+        sleep 2
+        python fix_hugo_syntax.py
+        
+
+    - name: Build MkDocs Site
+      if: steps.check.outputs.HAS_CHANGES == 'true' || github.event_name == 'workflow_dispatch'
+      run: mkdocs build
+
+    - name: Zip Artifact
+      if: steps.check.outputs.HAS_CHANGES == 'true' || github.event_name == 'workflow_dispatch'
+      run: |
+        RELEASE_DATE=$(date -d "+8 hours" +%Y-%m-%d)
+        ZIP_NAME="mtf-wiki-site-$RELEASE_DATE.zip"
+        mv site mtf-wiki-site-$RELEASE_DATE
+        zip -r $ZIP_NAME mtf-wiki-site-$RELEASE_DATE
+        
+        # 把带有文件夹路径的完整 ZIP 地址记下来，不然下一步找不到文件
+        echo "ZIP_PATH=mtf/$ZIP_NAME" >> $GITHUB_ENV
+        echo "TAG_NAME=mtf-$RELEASE_DATE" >> $GITHUB_ENV
+
+    - name: Create GitHub Release
+      if: steps.check.outputs.HAS_CHANGES == 'true' || github.event_name == 'workflow_dispatch'
+      uses: softprops/action-gh-release@v2
+      with:
+        files: ${{ env.ZIP_PATH }} # 👈 这里调用了刚才存的完整路径
+        tag_name: ${{ env.TAG_NAME }}
+        name: "MtF 自动构建版 ${{ env.TAG_NAME }}"
+        body: "🤖 上游同步 Hash: `${{ env.LATEST_HASH }}`"
+
+    - name: Commit Sync Log
+      if: steps.check.outputs.HAS_CHANGES == 'true'
+      # 切换回根目录提交，防止 Git 找不到仓库边界
+      working-directory: .
+      run: |
+        # 将最新的 Hash 写进 mtf 文件夹里
+        echo ${{ env.LATEST_HASH }} > mtf/last_sync_hash.txt
+        
+        git config --global user.name "github-actions[bot]"
+        git config --global user.email "github-actions[bot]@users.noreply.github.com"
+        
+        # 让 Git 拉取一下最新的代码（防冲突护城河）
+        git pull origin main --rebase
+        
+        git add mtf/last_sync_hash.txt
+        git commit -m "📝 chore(mtf): 自动更新指纹日志"
+        git push
